@@ -1,0 +1,436 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# GitHub Stars Analysis for daytonaio/daytona\n",
+    "\n",
+    "This notebook analyzes the GitHub stars for the daytonaio/daytona repository, including temporal analysis, user demographics, and engagement metrics."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Import required libraries\n",
+    "import pandas as pd\n",
+    "import numpy as np\n",
+    "import matplotlib.pyplot as plt\n",
+    "import seaborn as sns\n",
+    "import plotly.express as px\n",
+    "import plotly.graph_objects as go\n",
+    "from plotly.subplots import make_subplots\n",
+    "import requests\n",
+    "import time\n",
+    "from datetime import datetime, timedelta\n",
+    "import csv\n",
+    "import os\n",
+    "\n",
+    "# Set up plotting styles\n",
+    "plt.style.use('seaborn')\n",
+    "sns.set_palette('viridis')\n",
+    "\n",
+    "# GitHub API configuration\n",
+    "GITHUB_API_URL = 'https://api.github.com'\n",
+    "REPO_OWNER = 'daytonaio'\n",
+    "REPO_NAME = 'daytona'\n",
+    "GITHUB_TOKEN = 'YOUR_GITHUB_TOKEN_HERE'  # Replace with your actual GitHub token\n",
+    "\n",
+    "headers = {\n",
+    "    'Authorization': f'token {GITHUB_TOKEN}',\n",
+    "    'Accept': 'application/vnd.github.v3+json'\n",
+    "}"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 1. Collect Stargazer Data"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def fetch_stargazers(owner, repo, max_pages=None):\n",
+    "    url = f'{GITHUB_API_URL}/repos/{owner}/{repo}/stargazers'\n",
+    "    params = {'per_page': 100}\n",
+    "    stargazers = []\n",
+    "    page = 1\n",
+    "    \n",
+    "    while True:\n",
+    "        response = requests.get(url, headers=headers, params=params)\n",
+    "        if response.status_code != 200:\n",
+    "            print(f'Error fetching data: {response.status_code}')\n",
+    "            break\n",
+    "        \n",
+    "        data = response.json()\n",
+    "        if not data:\n",
+    "            break\n",
+    "        \n",
+    "        stargazers.extend(data)\n",
+    "        \n",
+    "        # Save batch to CSV\n",
+    "        save_to_csv(data, f'stargazers_batch_{page}.csv')\n",
+    "        \n",
+    "        print(f'Fetched page {page}')\n",
+    "        \n",
+    "        if max_pages and page >= max_pages:\n",
+    "            break\n",
+    "        \n",
+    "        page += 1\n",
+    "        params['page'] = page\n",
+    "        \n",
+    "        # Respect GitHub API rate limits\n",
+    "        time.sleep(1)\n",
+    "    \n",
+    "    return stargazers\n",
+    "\n",
+    "def save_to_csv(data, filename):\n",
+    "    with open(filename, 'w', newline='', encoding='utf-8') as csvfile:\n",
+    "        writer = csv.DictWriter(csvfile, fieldnames=data[0].keys())\n",
+    "        writer.writeheader()\n",
+    "        for row in data:\n",
+    "            writer.writerow(row)\n",
+    "\n",
+    "# Fetch stargazers data\n",
+    "stargazers = fetch_stargazers(REPO_OWNER, REPO_NAME)\n",
+    "\n",
+    "# Combine all CSV files\n",
+    "all_stargazers = []\n",
+    "for file in os.listdir():\n",
+    "    if file.startswith('stargazers_batch_') and file.endswith('.csv'):\n",
+    "        df = pd.read_csv(file)\n",
+    "        all_stargazers.append(df)\n",
+    "        os.remove(file)  # Clean up individual batch files\n",
+    "\n",
+    "stargazers_df = pd.concat(all_stargazers, ignore_index=True)\n",
+    "stargazers_df['starred_at'] = pd.to_datetime(stargazers_df['starred_at'])\n",
+    "\n",
+    "print(f'Total stargazers fetched: {len(stargazers_df)}')\n",
+    "stargazers_df.head()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 2. Temporal Analysis"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Daily growth\n",
+    "daily_growth = stargazers_df.groupby(stargazers_df['starred_at'].dt.date).size().cumsum()\n",
+    "\n",
+    "# Weekly growth\n",
+    "weekly_growth = stargazers_df.groupby(stargazers_df['starred_at'].dt.to_period('W')).size().cumsum()\n",
+    "\n",
+    "# Monthly growth\n",
+    "monthly_growth = stargazers_df.groupby(stargazers_df['starred_at'].dt.to_period('M')).size().cumsum()\n",
+    "\n",
+    "# Visualize growth patterns\n",
+    "fig = make_subplots(rows=3, cols=1, subplot_titles=('Daily Growth', 'Weekly Growth', 'Monthly Growth'))\n",
+    "\n",
+    "fig.add_trace(go.Scatter(x=daily_growth.index, y=daily_growth.values, mode='lines', name='Daily'), row=1, col=1)\n",
+    "fig.add_trace(go.Scatter(x=weekly_growth.index.to_timestamp(), y=weekly_growth.values, mode='lines', name='Weekly'), row=2, col=1)\n",
+    "fig.add_trace(go.Scatter(x=monthly_growth.index.to_timestamp(), y=monthly_growth.values, mode='lines', name='Monthly'), row=3, col=1)\n",
+    "\n",
+    "fig.update_layout(height=900, title_text='Star Growth Patterns')\n",
+    "fig.show()\n",
+    "\n",
+    "# Identify peak periods\n",
+    "daily_increase = daily_growth.diff()\n",
+    "peak_days = daily_increase.nlargest(5)\n",
+    "\n",
+    "print('Top 5 peak days:')\n",
+    "print(peak_days)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 3. User Demographics Analysis"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Analyze user types\n",
+    "user_types = stargazers_df['type'].value_counts()\n",
+    "\n",
+    "# Analyze site admin status\n",
+    "site_admin_status = stargazers_df['site_admin'].value_counts()\n",
+    "\n",
+    "# Visualize user demographics\n",
+    "fig = make_subplots(rows=1, cols=2, specs=[[{'type':'domain'}, {'type':'domain'}]],\n",
+    "                    subplot_titles=['User Types', 'Site Admin Status'])\n",
+    "\n",
+    "fig.add_trace(go.Pie(labels=user_types.index, values=user_types.values, name='User Types'), 1, 1)\n",
+    "fig.add_trace(go.Pie(labels=site_admin_status.index, values=site_admin_status.values, name='Site Admin Status'), 1, 2)\n",
+    "\n",
+    "fig.update_layout(title_text='User Demographics')\n",
+    "fig.show()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 4. User Engagement Metrics"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def fetch_user_details(username):\n",
+    "    url = f'{GITHUB_API_URL}/users/{username}'\n",
+    "    response = requests.get(url, headers=headers)\n",
+    "    if response.status_code == 200:\n",
+    "        return response.json()\n",
+    "    else:\n",
+    "        print(f'Error fetching user details for {username}: {response.status_code}')\n",
+    "        return None\n",
+    "\n",
+    "# Fetch user details for a sample of users (to avoid hitting rate limits)\n",
+    "sample_size = min(100, len(stargazers_df))  # Adjust sample size as needed\n",
+    "sample_users = stargazers_df['login'].sample(sample_size)\n",
+    "\n",
+    "user_details = []\n",
+    "for username in sample_users:\n",
+    "    details = fetch_user_details(username)\n",
+    "    if details:\n",
+    "        user_details.append(details)\n",
+    "    time.sleep(1)  # Respect API rate limits\n",
+    "\n",
+    "user_details_df = pd.DataFrame(user_details)\n",
+    "\n",
+    "# Analyze followers/following patterns\n",
+    "plt.figure(figsize=(10, 6))\n",
+    "plt.scatter(user_details_df['followers'], user_details_df['following'])\n",
+    "plt.xlabel('Followers')\n",
+    "plt.ylabel('Following')\n",
+    "plt.title('Followers vs Following for Sample Users')\n",
+    "plt.show()\n",
+    "\n",
+    "# Calculate engagement ratio (followers / following)\n",
+    "user_details_df['engagement_ratio'] = user_details_df['followers'] / user_details_df['following'].replace(0, 1)\n",
+    "\n",
+    "plt.figure(figsize=(10, 6))\n",
+    "sns.histplot(user_details_df['engagement_ratio'], bins=30, kde=True)\n",
+    "plt.xlabel('Engagement Ratio (Followers / Following)')\n",
+    "plt.title('Distribution of User Engagement Ratios')\n",
+    "plt.show()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 5. Data Visualization"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Time series plot of star growth (interactive)\n",
+    "fig = px.line(daily_growth.reset_index(), x='index', y=daily_growth.values, \n",
+    "              title='Cumulative Star Growth Over Time')\n",
+    "fig.update_xaxes(title='Date')\n",
+    "fig.update_yaxes(title='Total Stars')\n",
+    "fig.show()\n",
+    "\n",
+    "# Heatmap of starring patterns by time of day/week\n",
+    "stargazers_df['day_of_week'] = stargazers_df['starred_at'].dt.dayofweek\n",
+    "stargazers_df['hour_of_day'] = stargazers_df['starred_at'].dt.hour\n",
+    "\n",
+    "heatmap_data = stargazers_df.groupby(['day_of_week', 'hour_of_day']).size().unstack()\n",
+    "\n",
+    "plt.figure(figsize=(12, 8))\n",
+    "sns.heatmap(heatmap_data, cmap='YlOrRd', annot=True, fmt='d')\n",
+    "plt.title('Starring Patterns by Day of Week and Hour of Day')\n",
+    "plt.xlabel('Hour of Day')\n",
+    "plt.ylabel('Day of Week')\n",
+    "plt.show()\n",
+    "\n",
+    "# Network graph of user connections (if follower data is available)\n",
+    "# This part is commented out as it requires additional API calls to fetch follower data\n",
+    "'''\n",
+    "import networkx as nx\n",
+    "\n",
+    "G = nx.Graph()\n",
+    "\n",
+    "for _, user in user_details_df.iterrows():\n",
+    "    G.add_node(user['login'], followers=user['followers'], following=user['following'])\n",
+    "\n",
+    "# Add edges (this would require fetching follower data for each user)\n",
+    "# for user in G.nodes():\n",
+    "#     followers = fetch_user_followers(user)\n",
+    "#     for follower in followers:\n",
+    "#         if follower in G.nodes():\n",
+    "#             G.add_edge(user, follower)\n",
+    "\n",
+    "plt.figure(figsize=(12, 8))\n",
+    "pos = nx.spring_layout(G)\n",
+    "nx.draw(G, pos, node_size=[G.nodes[node]['followers'] for node in G.nodes()], \n",
+    "        with_labels=True, font_size=8, alpha=0.7)\n",
+    "plt.title('User Connection Network')\n",
+    "plt.show()\n",
+    "'''"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 6. Deeper Insights: User Activity Patterns"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def fetch_user_repos(username):\n",
+    "    url = f'{GITHUB_API_URL}/users/{username}/repos'\n",
+    "    response = requests.get(url, headers=headers)\n",
+    "    if response.status_code == 200:\n",
+    "        return response
+    if response.status_code == 200:
+        return response.json()
+    else:
+        print(f'Error fetching repos for {username}: {response.status_code}')\
+        return None
+
+def fetch_user_gists(username):
+    url = f'{GITHUB_API_URL}/users/{username}/gists'
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        return response.json()
+    else:
+        print(f'Error fetching gists for {username}: {response.status_code}')
+        return None
+
+# Analyze user activity for the sample users
+user_activity = []
+
+for username in sample_users:
+    repos = fetch_user_repos(username)
+    gists = fetch_user_gists(username)
+    
+    if repos is not None and gists is not None:
+        activity = {
+            'username': username,
+            'repo_count': len(repos),
+            'gist_count': len(gists),
+            'total_stars': sum(repo['stargazers_count'] for repo in repos),
+            'total_forks': sum(repo['forks_count'] for repo in repos),
+            'languages': set(repo['language'] for repo in repos if repo['language'])
+        }
+        user_activity.append(activity)
+    
+    time.sleep(1)  # Respect API rate limits
+
+user_activity_df = pd.DataFrame(user_activity)
+
+# Visualize user activity patterns
+fig = make_subplots(rows=2, cols=2, subplot_titles=('Repositories vs Gists', 'Total Stars vs Forks',
+                                                    'Distribution of Repository Count', 'Top Programming Languages'))
+
+fig.add_trace(go.Scatter(x=user_activity_df['repo_count'], y=user_activity_df['gist_count'],
+                         mode='markers', name='Repos vs Gists'), row=1, col=1)
+
+fig.add_trace(go.Scatter(x=user_activity_df['total_stars'], y=user_activity_df['total_forks'],
+                         mode='markers', name='Stars vs Forks'), row=1, col=2)
+
+fig.add_trace(go.Histogram(x=user_activity_df['repo_count'], name='Repository Count'), row=2, col=1)
+
+language_counts = pd.Series([lang for langs in user_activity_df['languages'] for lang in langs]).value_counts()
+fig.add_trace(go.Bar(x=language_counts.index[:10], y=language_counts.values[:10], name='Top Languages'), row=2, col=2)
+
+fig.update_layout(height=800, title_text='User Activity Patterns')
+fig.show()
+
+# Analyze correlation between user activity and starring behavior
+stargazers_df['starred_at'] = pd.to_datetime(stargazers_df['starred_at'])
+user_activity_df = user_activity_df.merge(stargazers_df[['login', 'starred_at']], left_on='username', right_on='login')
+
+user_activity_df['days_since_joining'] = (user_activity_df['starred_at'] - user_activity_df['created_at']).dt.days
+
+plt.figure(figsize=(10, 6))
+plt.scatter(user_activity_df['days_since_joining'], user_activity_df['repo_count'])
+plt.xlabel('Days Since Joining GitHub')
+plt.ylabel('Number of Repositories')
+plt.title('GitHub Account Age vs Repository Count')
+plt.show()
+
+# Calculate and display correlation matrix
+correlation_matrix = user_activity_df[['repo_count', 'gist_count', 'total_stars', 'total_forks', 'days_since_joining']].corr()
+
+plt.figure(figsize=(10, 8))
+sns.heatmap(correlation_matrix, annot=True, cmap='coolwarm')
+plt.title('Correlation Matrix of User Activity Metrics')
+plt.show()
+
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## Conclusion\n",
+    "\n",
+    "In this analysis, we've explored various aspects of the GitHub stars for the daytonaio/daytona repository:\n",
+    "\n",
+    "1. We collected stargazer data using the GitHub API, implementing batch processing with CSV storage to handle rate limits.\n",
+    "2. We performed temporal analysis, revealing daily, weekly, and monthly growth patterns, and identified peak periods of star activity.\n",
+    "3. We analyzed user demographics based on user types and site admin status, providing insights into the composition of the repository's stargazers.\n",
+    "4. We created user engagement metrics by analyzing followers/following patterns for a sample of users.\n",
+    "5. We visualized the data through various plots, including time series of star growth, pie charts for user type distribution, and heatmaps for starring patterns by time of day/week.\n",
+    "6. We conducted a deeper analysis of user activity patterns by examining their public repositories and gists, and explored correlations between various activity metrics.\n",
+    "\n",
+    "This comprehensive analysis provides valuable insights into the growth and user base of the daytonaio/daytona repository. Future work could involve more in-depth network analysis of user connections, sentiment analysis of user bios or repository descriptions, and comparative analysis with similar repositories in the same domain."
+   ]
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.8.8"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 4
+}
