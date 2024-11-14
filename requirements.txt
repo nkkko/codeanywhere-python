@@ -8,4 +8,4 @@ statsmodels
 jupyterlab
 plotly
 networkx
-dotenv
+python-dotenv
